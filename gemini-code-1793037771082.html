@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Scanner - Quét Trắc Nghiệm</title>
+    
+    <!-- Giao diện Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Icon FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Thư viện nhận diện mã ArUco -->
+    <script type="text/javascript" src="https://raw.githack.com/jcmellado/js-aruco/master/src/cv.js"></script>
+    <script type="text/javascript" src="https://raw.githack.com/jcmellado/js-aruco/master/src/aruco.js"></script>
+    
+    <!-- Thư viện vẽ biểu đồ Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-100 flex flex-col h-screen font-sans">
+
+    <div class="flex-1 w-full max-w-lg mx-auto bg-white shadow-xl flex flex-col relative overflow-hidden h-full overflow-y-auto">
+        
+        <!-- Header -->
+        <div class="bg-blue-600 text-white p-3 text-center shadow z-10 shrink-0">
+            <h1 class="text-xl font-bold uppercase tracking-wider"><i class="fa-solid fa-qrcode mr-2"></i>Máy Quét Trắc Nghiệm</h1>
+        </div>
+        
+        <!-- Camera Area -->
+        <div class="relative w-full bg-black shrink-0 aspect-video flex items-center justify-center overflow-hidden">
+            <video id="video" class="absolute w-full h-full object-cover" autoplay playsinline></video>
+            <canvas id="canvas" class="absolute w-full h-full object-cover"></canvas>
+            
+            <div id="start-overlay" class="absolute inset-0 bg-black/70 flex items-center justify-center z-20">
+                <button id="start-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-8 rounded-full shadow-lg transform transition active:scale-95 text-lg">
+                    <i class="fa-solid fa-camera mr-2"></i> Mở Camera Quét
+                </button>
+            </div>
+        </div>
+
+        <!-- Bảng điều khiển -->
+        <div class="p-4 bg-white z-10 flex-1 flex flex-col">
+            
+            <!-- Cài đặt bài quét -->
+            <div class="flex gap-2 mb-3">
+                <select id="class-select" class="w-24 border border-gray-300 rounded p-2 text-sm font-semibold outline-none focus:border-blue-500">
+                    <option value="9A">Lớp 9A</option>
+                    <option value="9B">Lớp 9B</option>
+                    <option value="9C">Lớp 9C</option>
+                </select>
+                <input type="text" id="lesson-name" placeholder="Tên bài kiểm tra" class="flex-1 border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500">
+                <!-- Nâng cấp: Nhập chuỗi đáp án (Chỉ nhận A,B,C,D tự viết hoa) -->
+                <input type="text" id="answer-key" placeholder="Đáp án (VD: ABCD)" class="w-32 border border-green-400 bg-green-50 text-green-700 rounded p-2 text-sm font-bold outline-none focus:border-green-600 uppercase tracking-widest" oninput="this.value = this.value.toUpperCase().replace(/[^ABCD]/g, '')">
+            </div>
+
+            <!-- Trạng thái & Lượt quét -->
+            <div class="flex justify-between items-center mb-2">
+                <p class="text-gray-600 font-semibold text-sm">Câu đang quét: 
+                    <span id="current-q-display" class="text-blue-600 font-bold text-lg mx-1">1</span>
+                    <button id="reset-q-btn" class="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded shadow-sm"><i class="fa-solid fa-rotate-left"></i> Về Câu 1</button>
+                </p>
+                <p class="text-gray-600 font-semibold text-sm">Đã quét: <span id="scan-count" class="text-green-600 font-bold text-lg">0</span></p>
+            </div>
+            
+            <div class="mb-2">
+                <p class="text-xs text-gray-500 italic" id="status-text">Đang chờ...</p>
+            </div>
+
+            <!-- Kết quả mới nhất -->
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4 shrink-0">
+                <div class="flex justify-between items-center">
+                    <div class="w-2/3 truncate pr-2">
+                        <p class="text-xs text-gray-500 uppercase tracking-wider">Học sinh vừa quét</p>
+                        <p class="text-xl font-black text-gray-800 truncate" id="last-id">--</p>
+                    </div>
+                    <div class="w-1/3 text-right border-l-2 border-slate-200 pl-2">
+                        <p class="text-xs text-gray-500 uppercase tracking-wider">Đáp án</p>
+                        <p class="text-4xl font-black text-blue-600" id="last-answer">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Biểu đồ & Nút chuyển câu -->
+            <div class="mt-auto pt-4 border-t-2 border-slate-100 flex-1 flex flex-col">
+                <h3 class="text-sm font-bold text-gray-600 text-center mb-2 uppercase tracking-wider">Thống kê câu hiện tại</h3>
+                <div class="relative flex-1 min-h-[120px] w-full">
+                    <canvas id="answerChart"></canvas>
+                </div>
+                
+                <button id="next-q-btn" class="mt-4 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 rounded-lg shadow-sm transition transform active:scale-95 shrink-0">
+                    <i class="fa-solid fa-forward-step mr-2"></i>Quét CÂU TIẾP THEO
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        window.addEventListener('error', function(e) {
+            if(e.message.includes('AR is not defined')) alert("Lỗi tải thư viện nhận diện! Vui lòng kiểm tra mạng.");
+        });
+
+        // ================= DANH SÁCH HỌC SINH =================
+        const studentLists = {
+            "9A": { 1: "Dầu Tuấn Anh", 2: "Hù Thị Phương Anh", 3: "Lương Phan Anh", 4: "Nguyễn Quốc Anh", 5: "Nguyễn Ngọc Ánh", 6: "Giàng Minh Chí", 7: "Đoàn Đức Dục", 8: "Nguyễn Hải Đăng", 9: "Đoàn Trung Hiếu", 10: "Vương Gia Hưng", 11: "Mộc Hữu Khang", 12: "Phạm Đăng Khôi", 13: "Tẩn Trung Kiên", 14: "Lý Thị Trà My", 15: "Ngô Hải Nam", 16: "Sùng Hạo Năm", 17: "Nguyễn Thái Bảo Ngọc", 18: "Nguyễn Huy Nhật", 19: "Cao Hiểu Phương", 20: "Giàng Dùng Sơn", 21: "Lý Phương Thảo", 22: "Hoàng Hà Anh Thư", 23: "Nguyễn Lương Bảo Trâm", 24: "Nguyễn Ngọc Trâm", 25: "Vương Kim Tuyến", 26: "Vàng Thị Thanh Vân", 27: "Dương Hoàng Vũ", 28: "Hoàng Ngọc Vũ", 29: "Phạm Hải Yến" },
+            "9B": { 1: "Dương Phương Anh", 2: "Nông Việt Anh", 3: "Phùng Văn Bảo", 4: "Hoàng Văn Biên", 5: "Trần Thị Bích Diệp", 6: "Nông Hiền Dịu", 7: "Phùng Thanh Dung", 8: "Liềng Văn Đông", 9: "Chảo Thu Hiền", 10: "Nguyễn Việt Hoàng", 11: "Lê Hà Linh", 12: "Lương Đình Lục", 13: "Phan Văn Lượng", 14: "Hồ Văn Nghĩa", 15: "Vũ Long Nhật", 16: "Hồ Bảo Quyên", 17: "Hồ Thái Quyền", 18: "Vũ Đình Sơn", 19: "Hoàng Minh Tân", 20: "Dương Phương Thanh", 21: "Trần Anh Thư", 22: "Hoàng Bảo Trang", 23: "Vũ Trần Quỳnh Trang", 24: "Hồ Dương Minh Trí", 25: "Lò Anh Tuấn", 26: "Vương Anh Tuấn", 27: "Nguyễn Chí Tùng", 28: "Hồ Long Vũ", 29: "Sí Hoàng Vũ", 30: "Trang Thị Yến", 31: "Đặng Mai Linh" },
+            "9C": { 1: "Đỗ Lâm Anh", 2: "Hoàng Đức Anh", 3: "Lù Nguyễn Việt Anh", 4: "Dương Gia Bảo", 5: "Nguyễn Viết Bình", 6: "Má A Chung", 7: "Tráng Thành Đạt", 8: "Vũ Thành Đạt", 9: "Nguyễn Thu Hà", 10: "Nguyễn Lâm Hùng", 11: "Lục Thị Nhị Hương", 12: "Lê Trung Kiên", 13: "Vàng Xuân Long", 14: "Vàng Thị Vân Nga", 15: "Nùng Văn Ngọc", 16: "Lù Bảo Nguyễn", 17: "Lìu Đức Nhân", 18: "Bùi Minh Quân", 19: "Phùng Minh Quân", 20: "Phạm Hoàng Quyền", 21: "Hù Linh Thảo", 22: "Vũ Minh Thu", 23: "Lìu Anh Tú", 24: "Nguyễn Việt Tú", 25: "Lý Ngọc Tuyết", 26: "Nùng Thị Ánh Tuyết", 27: "Nông Vi Tuấn Vũ", 28: "Nông Xuân Vũ", 29: "Nguyễn Tường Vy", 30: "Trần Thảo Vy", 31: "Phan Thị Yến" }
+        };
+
+        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxgV5JVYrOlU4bpoonyS8PVXLiQCSNJkT_oIfx7gaPt-mTLC1WBnKgboIacfGwA4jPP/exec';
+        const COOLDOWN_TIME = 5000; 
+        
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        
+        const startBtn = document.getElementById('start-btn');
+        const startOverlay = document.getElementById('start-overlay');
+        const statusText = document.getElementById('status-text');
+        const lastIdEl = document.getElementById('last-id');
+        const lastAnswerEl = document.getElementById('last-answer');
+        const scanCountEl = document.getElementById('scan-count');
+        const currentQDisplay = document.getElementById('current-q-display');
+
+        let detector;
+        const scannedData = new Map();
+        let scanCount = 0;
+        let currentQuestion = 1; // Biến theo dõi câu hiện tại
+        
+        let answerCounts = { A: 0, B: 0, C: 0, D: 0 };
+        let resultChart;
+        let audioCtx; 
+
+        // ================= KHỞI TẠO BIỂU ĐỒ =================
+        window.addEventListener('DOMContentLoaded', () => {
+            const ctxChart = document.getElementById('answerChart').getContext('2d');
+            resultChart = new Chart(ctxChart, {
+                type: 'bar', 
+                data: {
+                    labels: ['A', 'B', 'C', 'D'],
+                    datasets: [{
+                        data: [0, 0, 0, 0],
+                        backgroundColor: ['#3b82f6', '#ef4444', '#eab308', '#22c55e'],
+                        borderRadius: 4
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+            });
+        });
+
+        // ================= PHÁT ÂM THANH BÍP =================
+        function playBeep() {
+            if (!audioCtx) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.type = 'sine'; oscillator.frequency.value = 800;
+            gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            oscillator.connect(gainNode); gainNode.connect(audioCtx.destination);
+            oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.1);
+        }
+
+        // ================= MỞ CAMERA =================
+        startBtn.addEventListener('click', async () => {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert("Lỗi: Trình duyệt chặn camera. Mở qua link https:// và dùng Safari/Chrome gốc."); return;
+            }
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
+                video.srcObject = stream;
+                await video.play(); 
+                startOverlay.classList.add('hidden');
+                statusText.innerText = "Sẵn sàng quét Câu " + currentQuestion;
+                statusText.classList.replace('text-blue-500', 'text-green-500');
+                detector = new AR.Detector();
+                video.addEventListener('loadedmetadata', () => {
+                    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+                    requestAnimationFrame(scan);
+                });
+            } catch (err) { alert("Lỗi truy cập camera: " + err.message + "\nHãy cấp quyền Máy ảnh."); }
+        });
+
+        function getAnswerFromCorners(corners) {
+            let cx = 0, cy = 0;
+            for(let i=0; i<4; i++){ cx += corners[i].x; cy += corners[i].y; }
+            cx /= 4; cy /= 4;
+            let dx = corners[0].x - cx, dy = corners[0].y - cy;
+            let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+            if(angle >= -135 && angle < -45) return 'B';
+            if(angle >= -45 && angle < 45) return 'C';
+            if(angle >= 45 && angle < 135) return 'D';
+            return 'A'; 
+        }
+
+        function scan() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                if(canvas.width !== video.videoWidth) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                const markers = detector.detect(imageData);
+                drawCorners(markers);
+
+                const now = Date.now();
+                const selectedClass = document.getElementById('class-select').value;
+                const answerKeyStr = document.getElementById('answer-key').value;
+                
+                // Trích xuất đáp án đúng của câu hiện tại từ chuỗi (Ký tự thứ N)
+                let correctAnswer = "";
+                if (answerKeyStr && currentQuestion <= answerKeyStr.length) {
+                    correctAnswer = answerKeyStr.charAt(currentQuestion - 1); // charAt bắt đầu từ 0
+                }
+
+                markers.forEach(marker => {
+                    const studentId = marker.id;
+                    const answer = getAnswerFromCorners(marker.corners);
+                    const lastScanTime = scannedData.get(studentId) || 0;
+                    
+                    if (now - lastScanTime > COOLDOWN_TIME) {
+                        scannedData.set(studentId, now);
+                        playBeep();
+                        
+                        // 1. Cập nhật biểu đồ
+                        answerCounts[answer]++;
+                        resultChart.data.datasets[0].data = [answerCounts.A, answerCounts.B, answerCounts.C, answerCounts.D];
+                        resultChart.update();
+
+                        // 2. Cập nhật UI và đổi màu
+                        let displayName = studentLists[selectedClass]?.[studentId] || ("Học sinh ID " + studentId);
+                        lastIdEl.innerText = displayName;
+                        lastAnswerEl.innerText = answer;
+
+                        if (correctAnswer !== "") {
+                            lastAnswerEl.style.color = (answer === correctAnswer) ? '#16a34a' : '#dc2626'; 
+                        } else {
+                            lastAnswerEl.style.color = '#2563eb'; 
+                        }
+                        
+                        // 3. Đẩy lên Sheets
+                        sendDataToGoogleSheets(studentId, answer, displayName, selectedClass, correctAnswer);
+                    }
+                });
+            }
+            requestAnimationFrame(scan);
+        }
+
+        function drawCorners(markers) {
+            context.lineWidth = 4;
+            markers.forEach(marker => {
+                const corners = marker.corners;
+                context.strokeStyle = "red"; context.beginPath();
+                for (let i = 0; i < corners.length; i++) { context.moveTo(corners[i].x, corners[i].y); context.lineTo(corners[(i + 1) % 4].x, corners[(i + 1) % 4].y); }
+                context.stroke(); context.closePath();
+                context.strokeStyle = "green"; context.beginPath();
+                context.arc(corners[0].x, corners[0].y, 5, 0, 2 * Math.PI); context.stroke(); context.closePath();
+                context.fillStyle = "blue"; context.font = "24px Arial";
+                context.fillText("ID: " + marker.id, corners[0].x, corners[0].y - 10);
+            });
+        }
+
+        // ================= GỬI GOOGLE SHEETS =================
+        function sendDataToGoogleSheets(studentId, answer, realName, selectedClass, correctAnswer) {
+            const baseLessonName = document.getElementById('lesson-name').value || 'Bài Kiểm tra';
+            const lessonName = baseLessonName + " - Câu " + currentQuestion; // Gắn thêm số Câu vào tên bài
+            
+            let diem = '', soCauDung = '', chiTietText = answer;
+
+            if (correctAnswer !== "") {
+                const isCorrect = (answer === correctAnswer);
+                diem = isCorrect ? 10 : 0;
+                soCauDung = isCorrect ? 1 : 0;
+                chiTietText = answer + (isCorrect ? " (Đúng)" : " (Sai)"); 
+            }
+
+            const payload = {
+                thoigian: new Date().toLocaleString('vi-VN'),
+                hovaten: realName,
+                lop: selectedClass,
+                'tenchude/baihoc': lessonName,
+                diemSo: diem,
+                socaudung: soCauDung,
+                thoigianlambaithi: '',
+                chiTiet: chiTietText
+            };
+
+            statusText.innerText = "Đang gửi điểm Câu " + currentQuestion + "...";
+            statusText.classList.replace('text-green-500', 'text-yellow-500');
+
+            fetch(GOOGLE_SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload), mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' } })
+            .then(() => {
+                scanCount++; scanCountEl.innerText = scanCount;
+                statusText.innerText = "Đã lưu Câu " + currentQuestion;
+                statusText.classList.replace('text-yellow-500', 'text-green-500');
+            }).catch(error => { console.error("Lỗi:", error); });
+        }
+
+        // ================= XÓA DỮ LIỆU ĐỂ CHUẨN BỊ QUÉT TIẾP =================
+        function resetScannerState(isFullReset) {
+            scannedData.clear();
+            scanCount = 0;
+            scanCountEl.innerText = scanCount;
+            
+            answerCounts = { A: 0, B: 0, C: 0, D: 0 };
+            resultChart.data.datasets[0].data = [0, 0, 0, 0];
+            resultChart.update();
+            
+            lastIdEl.innerText = "--";
+            lastAnswerEl.innerText = "-";
+            lastAnswerEl.style.color = '#2563eb';
+
+            if(isFullReset) {
+                currentQuestion = 1;
+                statusText.innerText = "Đã quay về Câu 1. Sẵn sàng quét!";
+            } else {
+                statusText.innerText = "Đã chuyển Câu " + currentQuestion + ". Sẵn sàng quét!";
+            }
+            currentQDisplay.innerText = currentQuestion;
+            statusText.classList.replace('text-green-500', 'text-blue-500');
+        }
+
+        // NÚT CHUYỂN CÂU TIẾP THEO
+        document.getElementById('next-q-btn').addEventListener('click', () => {
+            const answerKeyStr = document.getElementById('answer-key').value;
+            
+            // Kiểm tra xem đã quét hết chuỗi đáp án chưa
+            if (answerKeyStr && currentQuestion >= answerKeyStr.length) {
+                alert(`Bạn đã quét xong câu cuối cùng trong chuỗi đáp án (${answerKeyStr.length} câu).\nHệ thống sẽ tự động quay lại Câu 1.`);
+                resetScannerState(true);
+            } else {
+                currentQuestion++;
+                resetScannerState(false);
+            }
+        });
+
+        // NÚT VỀ CÂU 1 MÀ KHÔNG CẦN QUÉT HẾT
+        document.getElementById('reset-q-btn').addEventListener('click', () => {
+            if(confirm("Bạn có chắc muốn xóa lịch sử quét và quay lại từ Câu 1 không?")) {
+                resetScannerState(true);
+            }
+        });
+    </script>
+</body>
+</html>
